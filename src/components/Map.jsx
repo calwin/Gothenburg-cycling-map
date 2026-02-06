@@ -129,17 +129,22 @@ function LocationButton() {
 }
 
 // Full Google Maps-style navigation tracker
-function NavigationTracker({ isNavigating, onLocationUpdate }) {
+function NavigationTracker({ isNavigating, onLocationUpdate, startPoint }) {
   const map = useMap()
   const [isFollowing, setIsFollowing] = useState(true)
+  const isFollowingRef = useRef(true)
   const recenterControlRef = useRef(null)
   const markerRef = useRef(null)
   const circleRef = useRef(null)
   const watchIdRef = useRef(null)
   const lastHeadingRef = useRef(0)
   const lastPositionRef = useRef(null)
-  const mapContainerRef = useRef(null)
   const wakeLockRef = useRef(null)
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    isFollowingRef.current = isFollowing
+  }, [isFollowing])
 
   // Calculate heading between two points
   const calculateHeading = (from, to) => {
@@ -161,10 +166,6 @@ function NavigationTracker({ isNavigating, onLocationUpdate }) {
       if (recenterControlRef.current) recenterControlRef.current.remove()
       if (wakeLockRef.current) wakeLockRef.current.release()
 
-      // Reset map rotation
-      const container = map.getContainer()
-      container.style.transition = 'transform 0.5s ease'
-      container.style.transform = 'none'
       // Reset zoom controls etc
       map.setZoom(DEFAULT_ZOOM)
 
@@ -178,8 +179,6 @@ function NavigationTracker({ isNavigating, onLocationUpdate }) {
       return
     }
 
-    mapContainerRef.current = map.getContainer()
-
     // Keep screen awake during navigation
     const requestWakeLock = async () => {
       try {
@@ -192,8 +191,15 @@ function NavigationTracker({ isNavigating, onLocationUpdate }) {
     }
     requestWakeLock()
 
-    // Zoom in for navigation
-    map.setZoom(NAV_ZOOM)
+    // Immediately center on start point and zoom to street level
+    if (startPoint) {
+      map.setView([startPoint.lat, startPoint.lng], NAV_ZOOM, { animate: true })
+    } else {
+      map.setZoom(NAV_ZOOM)
+    }
+
+    // Invalidate map size after UI changes (header/controls hidden)
+    setTimeout(() => map.invalidateSize(), 300)
 
     // Disable zoom controls during navigation for cleaner UI
     map.zoomControl.remove()
@@ -301,22 +307,9 @@ function NavigationTracker({ isNavigating, onLocationUpdate }) {
         }).addTo(map)
       }
 
-      // Rotate the entire map container to match heading (Google Maps style)
-      if (mapContainerRef.current && isFollowing) {
-        const rotation = -heading // Negative because we rotate map opposite to heading
-        mapContainerRef.current.style.transition = 'transform 0.5s ease'
-        mapContainerRef.current.style.transform = `rotate(${rotation}deg)`
-      }
-
-      // Follow user - offset so user is in bottom third of screen
-      if (isFollowing) {
-        const point = map.latLngToContainerPoint(latlng)
-        const mapSize = map.getSize()
-        // Offset: user should be at bottom 1/3 of screen so they see more ahead
-        const offsetY = mapSize.y * 0.2
-        const targetPoint = L.point(point.x, point.y + offsetY)
-        const targetLatLng = map.containerPointToLatLng(targetPoint)
-        map.panTo(targetLatLng, { animate: true, duration: 0.3, noMoveStart: true })
+      // Follow user - keep them centered on map
+      if (isFollowingRef.current) {
+        map.setView(latlng, map.getZoom(), { animate: true, duration: 0.3 })
       }
 
       // Notify parent
@@ -346,15 +339,10 @@ function NavigationTracker({ isNavigating, onLocationUpdate }) {
       if (wakeLockRef.current) { wakeLockRef.current.release(); wakeLockRef.current = null }
       map.off('dragstart', onDragStart)
 
-      // Restore map
-      const container = map.getContainer()
-      container.style.transition = 'transform 0.5s ease'
-      container.style.transform = 'none'
-
       // Re-add zoom control
       L.control.zoom().addTo(map)
     }
-  }, [map, isNavigating, onLocationUpdate, isFollowing])
+  }, [map, isNavigating, onLocationUpdate])
 
   return null
 }
@@ -406,6 +394,7 @@ function Map({
       <NavigationTracker
         isNavigating={isNavigating}
         onLocationUpdate={onLocationUpdate}
+        startPoint={startPoint}
       />
 
       {/* Start marker */}
