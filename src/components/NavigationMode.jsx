@@ -15,26 +15,20 @@ function NavigationMode({
   const instructions = routeInfo?.instructions || []
   const routeCoords = routeInfo?.geometry?.coordinates || []
 
-  // Calculate distance between two points
   const getDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371e3 // Earth radius in meters
+    const R = 6371e3
     const φ1 = lat1 * Math.PI / 180
     const φ2 = lat2 * Math.PI / 180
     const Δφ = (lat2 - lat1) * Math.PI / 180
     const Δλ = (lon2 - lon1) * Math.PI / 180
-
     const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
               Math.cos(φ1) * Math.cos(φ2) *
               Math.sin(Δλ/2) * Math.sin(Δλ/2)
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-
-    return R * c
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
   }
 
-  // Find minimum distance from user to the route polyline
   const getDistanceToRoute = (lat, lng) => {
     let minDist = Infinity
-    // routeCoords are [lng, lat] (GeoJSON format)
     for (let i = 0; i < routeCoords.length; i++) {
       const d = getDistance(lat, lng, routeCoords[i][1], routeCoords[i][0])
       if (d < minDist) minDist = d
@@ -42,31 +36,22 @@ function NavigationMode({
     return minDist
   }
 
-  // Reset step when route changes (after reroute)
   useEffect(() => {
     setCurrentStep(0)
     setIsRerouting(false)
   }, [routeInfo])
 
-  // Update distance and auto-advance when location changes
   useEffect(() => {
     if (!userLocation || !instructions[currentStep]?.location) return
 
     const stepLoc = instructions[currentStep].location
-    const dist = getDistance(
-      userLocation.lat,
-      userLocation.lng,
-      stepLoc[0],
-      stepLoc[1]
-    )
+    const dist = getDistance(userLocation.lat, userLocation.lng, stepLoc[0], stepLoc[1])
     setDistanceToNext(dist)
 
-    // Auto-advance when within 25m of current step
     if (dist < 25 && currentStep < instructions.length - 1) {
       setCurrentStep(prev => prev + 1)
     }
 
-    // Off-route detection: reroute if >50m from route for 5 seconds
     if (onReroute && routeCoords.length > 0 && !isRerouting) {
       const distToRoute = getDistanceToRoute(userLocation.lat, userLocation.lng)
       if (distToRoute > 50) {
@@ -78,7 +63,6 @@ function NavigationMode({
           }, 5000)
         }
       } else {
-        // Back on route, cancel reroute timer
         if (rerouteTimerRef.current) {
           clearTimeout(rerouteTimerRef.current)
           rerouteTimerRef.current = null
@@ -86,37 +70,25 @@ function NavigationMode({
       }
     }
 
-    // Calculate ETA based on remaining distance
     const remainingDist = instructions
       .slice(currentStep)
       .reduce((sum, inst) => sum + (inst.distance || 0), 0)
-    const avgSpeed = routeInfo?.mode === 'walking' ? 5 : 15 // km/h
-    const etaMinutes = Math.round((remainingDist / 1000) / avgSpeed * 60)
-    setEta(etaMinutes)
-
+    const avgSpeed = routeInfo?.mode === 'walking' ? 5 : 15
+    setEta(Math.round((remainingDist / 1000) / avgSpeed * 60))
   }, [userLocation, currentStep, instructions, routeInfo?.mode, routeCoords, onReroute, isRerouting])
 
-  // Cleanup timer on unmount
   useEffect(() => {
     return () => {
       if (rerouteTimerRef.current) clearTimeout(rerouteTimerRef.current)
     }
   }, [])
 
-  const handlePrevStep = () => {
-    if (currentStep > 0) {
-      setCurrentStep(currentStep - 1)
-    }
-  }
-
-  const handleNextStep = () => {
-    if (currentStep < instructions.length - 1) {
-      setCurrentStep(currentStep + 1)
-    }
-  }
-
   const currentInstruction = instructions[currentStep]
   const nextInstruction = instructions[currentStep + 1]
+  if (!currentInstruction) return null
+
+  const isLastStep = currentStep === instructions.length - 1
+  const remainingDist = instructions.slice(currentStep).reduce((sum, i) => sum + (i.distance || 0), 0)
 
   const formatDistance = (meters) => {
     if (!meters && meters !== 0) return ''
@@ -125,145 +97,82 @@ function NavigationMode({
   }
 
   const formatEta = (minutes) => {
-    if (!minutes) return ''
+    if (!minutes) return '--'
     if (minutes < 60) return `${minutes} min`
-    const hours = Math.floor(minutes / 60)
-    const mins = minutes % 60
-    return `${hours}h ${mins}m`
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
   }
 
-  // Get direction icon (larger, clearer icons)
   const getDirectionIcon = (type) => {
     const icons = {
-      'depart': '🚀',
-      'arrive': '🏁',
-      'turn-left': '⬅️',
-      'turn-right': '➡️',
-      'turn-sharp-left': '↩️',
-      'turn-sharp-right': '↪️',
-      'turn-slight-left': '↖️',
-      'turn-slight-right': '↗️',
-      'continue': '⬆️',
-      'straight': '⬆️',
-      'roundabout': '🔄',
-      'rotary': '🔄',
-      'fork-left': '↙️',
-      'fork-right': '↘️',
-      'merge': '🔀',
-      'ramp': '📐',
-      'ferry': '⛴️',
-      'uturn': '↩️'
+      'depart': '↑', 'arrive': '⚑',
+      'turn-left': '←', 'turn-right': '→',
+      'turn-sharp-left': '↰', 'turn-sharp-right': '↱',
+      'turn-slight-left': '↖', 'turn-slight-right': '↗',
+      'continue': '↑', 'straight': '↑',
+      'roundabout': '↻', 'uturn-left': '↩', 'uturn-right': '↩',
+      'merge': '↗', 'merge-left': '↖', 'merge-right': '↗',
+      'ferry': '⛴', 'waypoint': '◆'
     }
-    return icons[type] || '⬆️'
+    return icons[type] || '↑'
   }
-
-  if (!currentInstruction) {
-    return null
-  }
-
-  const isLastStep = currentStep === instructions.length - 1
-  const progress = ((currentStep + 1) / instructions.length) * 100
 
   return (
-    <div className="navigation-mode">
-      {/* Close button */}
-      <button className="nav-close-btn" onClick={onClose} aria-label="Exit navigation">
-        ✕
-      </button>
+    <>
+      {/* TOP BAR - Current instruction (Google Maps style green bar) */}
+      <div className="nav-top">
+        {isRerouting && <div className="nav-rerouting">Rerouting...</div>}
 
-      {/* Rerouting indicator */}
-      {isRerouting && (
-        <div className="nav-rerouting">
-          Rerouting...
+        <div className="nav-top-main">
+          <div className="nav-top-icon">
+            {getDirectionIcon(currentInstruction.type)}
+          </div>
+          <div className="nav-top-info">
+            <div className="nav-top-distance">
+              {distanceToNext !== null && distanceToNext < 500
+                ? formatDistance(distanceToNext)
+                : formatDistance(currentInstruction.distance)}
+            </div>
+            <div className="nav-top-text">{currentInstruction.text}</div>
+          </div>
         </div>
-      )}
 
-      {/* ETA and remaining info */}
-      <div className="nav-eta-bar">
-        <div className="nav-eta">
-          <span className="nav-eta-time">{formatEta(eta) || '--'}</span>
-          <span className="nav-eta-label">ETA</span>
-        </div>
-        <div className="nav-remaining">
-          <span className="nav-remaining-dist">
-            {formatDistance(
-              instructions.slice(currentStep).reduce((sum, i) => sum + (i.distance || 0), 0)
-            )}
-          </span>
-          <span className="nav-remaining-label">remaining</span>
-        </div>
-        {userLocation && (
-          <div className="nav-gps-indicator">
-            <span className="gps-dot"></span>
-            GPS
+        {nextInstruction && !isLastStep && (
+          <div className="nav-top-next">
+            Then {getDirectionIcon(nextInstruction.type)} {nextInstruction.text}
+          </div>
+        )}
+
+        {isLastStep && (
+          <div className="nav-top-next nav-top-arrived">
+            You have arrived!
           </div>
         )}
       </div>
 
-      {/* Progress bar */}
-      <div className="nav-progress">
-        <div
-          className="nav-progress-fill"
-          style={{ width: `${progress}%` }}
-        />
+      {/* BOTTOM BAR - ETA, distance, controls */}
+      <div className="nav-bottom">
+        <div className="nav-bottom-info">
+          <span className="nav-bottom-eta">{formatEta(eta)}</span>
+          <span className="nav-bottom-dot">·</span>
+          <span className="nav-bottom-dist">{formatDistance(remainingDist)}</span>
+          {userLocation && <span className="nav-bottom-gps">GPS</span>}
+        </div>
+        <div className="nav-bottom-actions">
+          <button
+            className="nav-bottom-btn"
+            onClick={() => currentStep > 0 && setCurrentStep(currentStep - 1)}
+            disabled={currentStep === 0}
+          >◀</button>
+          <span className="nav-bottom-step">{currentStep + 1}/{instructions.length}</span>
+          <button
+            className="nav-bottom-btn"
+            onClick={() => !isLastStep && setCurrentStep(currentStep + 1)}
+            disabled={isLastStep}
+          >▶</button>
+          <button className="nav-bottom-exit" onClick={onClose}>Exit</button>
+        </div>
       </div>
-
-      {/* Current instruction - BIG and clear */}
-      <div className="nav-current">
-        <div className="nav-icon">
-          {getDirectionIcon(currentInstruction.type)}
-        </div>
-        <div className="nav-instruction">
-          <div className="nav-distance-big">
-            {distanceToNext !== null && distanceToNext < 500
-              ? formatDistance(distanceToNext)
-              : formatDistance(currentInstruction.distance)
-            }
-          </div>
-          <div className="nav-text">{currentInstruction.text}</div>
-        </div>
-      </div>
-
-      {/* Next instruction preview */}
-      {nextInstruction && !isLastStep && (
-        <div className="nav-next">
-          <span className="nav-next-label">Then</span>
-          <span className="nav-next-icon">{getDirectionIcon(nextInstruction.type)}</span>
-          <span className="nav-next-text">{nextInstruction.text}</span>
-          <span className="nav-next-dist">{formatDistance(nextInstruction.distance)}</span>
-        </div>
-      )}
-
-      {/* Arrival message */}
-      {isLastStep && (
-        <div className="nav-arrival">
-          🎉 You have arrived at your destination!
-        </div>
-      )}
-
-      {/* Navigation controls */}
-      <div className="nav-controls">
-        <button
-          className="nav-btn nav-prev"
-          onClick={handlePrevStep}
-          disabled={currentStep === 0}
-          aria-label="Previous step"
-        >
-          ◀
-        </button>
-        <div className="nav-step-counter">
-          {currentStep + 1} / {instructions.length}
-        </div>
-        <button
-          className="nav-btn nav-next-btn"
-          onClick={handleNextStep}
-          disabled={isLastStep}
-          aria-label="Next step"
-        >
-          ▶
-        </button>
-      </div>
-    </div>
+    </>
   )
 }
 
