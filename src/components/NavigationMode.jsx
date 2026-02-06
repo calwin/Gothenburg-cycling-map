@@ -1,15 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 function NavigationMode({
   routeInfo,
   userLocation,
-  onClose
+  onClose,
+  onReroute
 }) {
   const [currentStep, setCurrentStep] = useState(0)
   const [distanceToNext, setDistanceToNext] = useState(null)
   const [eta, setEta] = useState(null)
+  const [isRerouting, setIsRerouting] = useState(false)
+  const rerouteTimerRef = useRef(null)
 
   const instructions = routeInfo?.instructions || []
+  const routeCoords = routeInfo?.geometry?.coordinates || []
 
   // Calculate distance between two points
   const getDistance = (lat1, lon1, lat2, lon2) => {
@@ -26,6 +30,23 @@ function NavigationMode({
 
     return R * c
   }
+
+  // Find minimum distance from user to the route polyline
+  const getDistanceToRoute = (lat, lng) => {
+    let minDist = Infinity
+    // routeCoords are [lng, lat] (GeoJSON format)
+    for (let i = 0; i < routeCoords.length; i++) {
+      const d = getDistance(lat, lng, routeCoords[i][1], routeCoords[i][0])
+      if (d < minDist) minDist = d
+    }
+    return minDist
+  }
+
+  // Reset step when route changes (after reroute)
+  useEffect(() => {
+    setCurrentStep(0)
+    setIsRerouting(false)
+  }, [routeInfo])
 
   // Update distance and auto-advance when location changes
   useEffect(() => {
@@ -45,6 +66,26 @@ function NavigationMode({
       setCurrentStep(prev => prev + 1)
     }
 
+    // Off-route detection: reroute if >50m from route for 5 seconds
+    if (onReroute && routeCoords.length > 0 && !isRerouting) {
+      const distToRoute = getDistanceToRoute(userLocation.lat, userLocation.lng)
+      if (distToRoute > 50) {
+        if (!rerouteTimerRef.current) {
+          rerouteTimerRef.current = setTimeout(() => {
+            setIsRerouting(true)
+            onReroute({ lat: userLocation.lat, lng: userLocation.lng })
+            rerouteTimerRef.current = null
+          }, 5000)
+        }
+      } else {
+        // Back on route, cancel reroute timer
+        if (rerouteTimerRef.current) {
+          clearTimeout(rerouteTimerRef.current)
+          rerouteTimerRef.current = null
+        }
+      }
+    }
+
     // Calculate ETA based on remaining distance
     const remainingDist = instructions
       .slice(currentStep)
@@ -53,7 +94,14 @@ function NavigationMode({
     const etaMinutes = Math.round((remainingDist / 1000) / avgSpeed * 60)
     setEta(etaMinutes)
 
-  }, [userLocation, currentStep, instructions, routeInfo?.mode])
+  }, [userLocation, currentStep, instructions, routeInfo?.mode, routeCoords, onReroute, isRerouting])
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (rerouteTimerRef.current) clearTimeout(rerouteTimerRef.current)
+    }
+  }, [])
 
   const handlePrevStep = () => {
     if (currentStep > 0) {
@@ -122,6 +170,13 @@ function NavigationMode({
       <button className="nav-close-btn" onClick={onClose} aria-label="Exit navigation">
         ✕
       </button>
+
+      {/* Rerouting indicator */}
+      {isRerouting && (
+        <div className="nav-rerouting">
+          Rerouting...
+        </div>
+      )}
 
       {/* ETA and remaining info */}
       <div className="nav-eta-bar">

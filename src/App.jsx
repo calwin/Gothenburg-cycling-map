@@ -237,6 +237,9 @@ function App() {
           routeInfo={routeInfo}
           userLocation={userLocation}
           onClose={() => setIsNavigating(false)}
+          onReroute={(loc) => {
+            setStartPoint({ lat: loc.lat, lng: loc.lng, address: 'My Location' })
+          }}
         />
       )}
     </div>

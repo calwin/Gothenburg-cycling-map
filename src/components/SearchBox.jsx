@@ -8,7 +8,7 @@ const GOTHENBURG_CENTER = {
   lng: 11.9746
 }
 
-function SearchBox({ id, placeholder, value, onSelect }) {
+function SearchBox({ id, placeholder, value, onSelect, showMyLocation }) {
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -298,6 +298,35 @@ function SearchBox({ id, placeholder, value, onSelect }) {
         aria-controls={`${id}-suggestions`}
         aria-expanded={showSuggestions && suggestions.length > 0}
       />
+
+      {/* My Location button - only on "From" field */}
+      {showMyLocation && !query && (
+        <button
+          className="my-location-btn"
+          onClick={() => {
+            if (!navigator.geolocation) return
+            setQuery('Locating...')
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                const { latitude, longitude } = pos.coords
+                onSelect({
+                  lat: latitude,
+                  lng: longitude,
+                  address: 'My Location'
+                })
+              },
+              () => {
+                setQuery('')
+              },
+              { enableHighAccuracy: true, timeout: 10000 }
+            )
+          }}
+          type="button"
+          aria-label="Use my location"
+        >
+          📍 My Location
+        </button>
+      )}
 
       {/* Clear button */}
       {query && (

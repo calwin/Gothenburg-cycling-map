@@ -180,6 +180,7 @@ ${coordinates.map(coord => `      <trkpt lat="${coord[1]}" lon="${coord[0]}"${co
               placeholder="Search start location or click map"
               value={startPoint}
               onSelect={onStartSelected}
+              showMyLocation
             />
           </div>
 

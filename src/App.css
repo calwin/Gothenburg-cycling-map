@@ -435,6 +435,26 @@ html, body, #root {
   color: var(--text-muted);
 }
 
+.my-location-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--accent-green);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.my-location-btn:hover {
+  background: var(--accent-green-light);
+}
+
 .search-clear-btn {
   position: absolute;
   right: 8px;
@@ -1401,6 +1421,23 @@ input:checked + .toggle-slider:before {
 }
 
 /* ETA Bar */
+.nav-rerouting {
+  background: #ff9800;
+  color: white;
+  text-align: center;
+  padding: 6px;
+  font-weight: bold;
+  font-size: 14px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .nav-eta-bar {
   display: flex;
   align-items: center;
