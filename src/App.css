@@ -1346,6 +1346,7 @@ input:checked + .toggle-slider:before {
 .user-location-marker {
   background: transparent !important;
   border: none !important;
+  transition: transform 0.5s ease-out !important;
 }
 
 .nav-arrow-wrap {

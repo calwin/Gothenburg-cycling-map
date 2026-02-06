@@ -252,21 +252,33 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint }) {
       iconAnchor: [30, 30]
     })
 
+    // Smooth position using exponential moving average
+    const smoothPosition = (raw, prev, factor = 0.3) => {
+      if (!prev) return raw
+      return {
+        lat: prev.lat + factor * (raw.lat - prev.lat),
+        lng: prev.lng + factor * (raw.lng - prev.lng)
+      }
+    }
+
     const updateLocation = (position) => {
       const { latitude, longitude, accuracy, heading: deviceHeading } = position.coords
-      const latlng = [latitude, longitude]
-      const currentPos = { lat: latitude, lng: longitude }
+      const rawPos = { lat: latitude, lng: longitude }
 
-      // Calculate heading
+      // Smooth the position to reduce GPS jitter
+      const smoothed = smoothPosition(rawPos, lastPositionRef.current)
+      const latlng = [smoothed.lat, smoothed.lng]
+
+      // Calculate heading - only update when moved enough
       let heading = deviceHeading
       if ((heading === null || isNaN(heading)) && lastPositionRef.current) {
         const prev = lastPositionRef.current
         const dist = Math.sqrt(
-          Math.pow(currentPos.lat - prev.lat, 2) +
-          Math.pow(currentPos.lng - prev.lng, 2)
+          Math.pow(rawPos.lat - prev.lat, 2) +
+          Math.pow(rawPos.lng - prev.lng, 2)
         )
-        if (dist > 0.00003) { // ~3 meters
-          heading = calculateHeading(prev, currentPos)
+        if (dist > 0.00005) { // ~5 meters - larger threshold to avoid heading flicker
+          heading = calculateHeading(prev, rawPos)
           lastHeadingRef.current = heading
         } else {
           heading = lastHeadingRef.current
@@ -277,7 +289,7 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint }) {
         heading = lastHeadingRef.current
       }
 
-      lastPositionRef.current = currentPos
+      lastPositionRef.current = smoothed
 
       // Update or create arrow marker
       const arrowIcon = createArrowIcon(heading)
@@ -307,12 +319,12 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint }) {
         }).addTo(map)
       }
 
-      // Follow user - keep them centered on map
+      // Follow user - smooth pan
       if (isFollowingRef.current) {
-        map.setView(latlng, map.getZoom(), { animate: true, duration: 0.3 })
+        map.panTo(latlng, { animate: true, duration: 0.5, noMoveStart: true })
       }
 
-      // Notify parent
+      // Notify parent with raw position for accurate rerouting
       if (onLocationUpdate) {
         onLocationUpdate({ lat: latitude, lng: longitude, heading, accuracy })
       }
