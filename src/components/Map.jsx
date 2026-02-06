@@ -129,7 +129,7 @@ function LocationButton() {
 }
 
 // Full Google Maps-style navigation tracker
-function NavigationTracker({ isNavigating, onLocationUpdate, startPoint }) {
+function NavigationTracker({ isNavigating, onLocationUpdate, startPoint, endPoint }) {
   const map = useMap()
   const [isFollowing, setIsFollowing] = useState(true)
   const isFollowingRef = useRef(true)
@@ -191,15 +191,24 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint }) {
     }
     requestWakeLock()
 
-    // Immediately center on start point and zoom to street level
-    if (startPoint) {
-      map.setView([startPoint.lat, startPoint.lng], NAV_ZOOM, { animate: true })
-    } else {
-      map.setZoom(NAV_ZOOM)
-    }
-
     // Invalidate map size after UI changes (header/controls hidden)
-    setTimeout(() => map.invalidateSize(), 300)
+    setTimeout(() => {
+      map.invalidateSize()
+      // Show the full route first so user can see it
+      if (startPoint && endPoint) {
+        const bounds = L.latLngBounds([
+          [startPoint.lat, startPoint.lng],
+          [endPoint.lat, endPoint.lng]
+        ])
+        map.fitBounds(bounds, { padding: [80, 80] })
+      }
+      // After 2s, zoom to start point at street level for navigation
+      setTimeout(() => {
+        if (startPoint) {
+          map.setView([startPoint.lat, startPoint.lng], NAV_ZOOM, { animate: true })
+        }
+      }, 2000)
+    }, 300)
 
     // Disable zoom controls during navigation for cleaner UI
     map.zoomControl.remove()
@@ -407,6 +416,7 @@ function Map({
         isNavigating={isNavigating}
         onLocationUpdate={onLocationUpdate}
         startPoint={startPoint}
+        endPoint={endPoint}
       />
 
       {/* Start marker */}
