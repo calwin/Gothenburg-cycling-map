@@ -56,6 +56,45 @@ function getCostingOptions(routeType) {
 }
 
 /**
+ * Map Valhalla maneuver type (numeric) to a text type for navigation icons
+ * https://valhalla.github.io/valhalla/api/turn-by-turn/api-reference/#maneuver-object
+ */
+function mapManeuverType(type) {
+  const types = {
+    0: 'none',
+    1: 'depart',
+    2: 'depart-right',
+    3: 'depart-left',
+    4: 'arrive',
+    5: 'arrive-right',
+    6: 'arrive-left',
+    7: 'continue',
+    8: 'turn-slight-right',
+    9: 'turn-right',
+    10: 'turn-sharp-right',
+    11: 'uturn-right',
+    12: 'uturn-left',
+    13: 'turn-sharp-left',
+    14: 'turn-left',
+    15: 'turn-slight-left',
+    16: 'continue',
+    17: 'roundabout',
+    18: 'roundabout',
+    19: 'roundabout',
+    20: 'roundabout',
+    21: 'ferry',
+    22: 'ferry',
+    23: 'merge',
+    24: 'turn-right',
+    25: 'turn-left',
+    26: 'merge-right',
+    27: 'merge-left',
+    37: 'straight'
+  }
+  return types[type] || 'continue'
+}
+
+/**
  * Get cycling directions using Valhalla
  * Supports multiple waypoints for scenic routing through green spaces
  * @param {Object} start - Start point {lat, lng}
@@ -118,14 +157,20 @@ export async function getCyclingDirections(start, end, routeType = 'scenic', way
         allCoordinates = allCoordinates.concat(coordinates.slice(1))
       }
 
-      // Add instructions with waypoint info
-      const legInstructions = leg.maneuvers.map(m => ({
-        text: m.instruction,
-        distance: m.length * 1000,
-        duration: m.time,
-        type: m.type,
-        name: m.street_names ? m.street_names.join(', ') : ''
-      }))
+      // Add instructions with location from the route shape
+      const legInstructions = leg.maneuvers.map(m => {
+        // Valhalla gives begin_shape_index - the index into the decoded shape
+        const shapeIdx = m.begin_shape_index || 0
+        const coord = coordinates[shapeIdx] || coordinates[0]
+        return {
+          text: m.instruction,
+          distance: m.length * 1000,
+          duration: m.time,
+          type: mapManeuverType(m.type),
+          name: m.street_names ? m.street_names.join(', ') : '',
+          location: coord ? [coord[0], coord[1]] : null // [lat, lng]
+        }
+      })
 
       // Add waypoint arrival marker if this isn't the last leg
       if (i < trip.legs.length - 1 && waypoints[i]) {
@@ -134,7 +179,8 @@ export async function getCyclingDirections(start, end, routeType = 'scenic', way
           distance: 0,
           duration: 0,
           type: 'waypoint',
-          name: waypoints[i].name || ''
+          name: waypoints[i].name || '',
+          location: [waypoints[i].lat, waypoints[i].lng]
         })
       }
 

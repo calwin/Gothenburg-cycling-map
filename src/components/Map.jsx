@@ -72,10 +72,8 @@ function FitBounds({ startPoint, endPoint }) {
 // Component to handle user's current location
 function LocationButton() {
   const map = useMap()
-
-  const handleLocate = () => {
-    map.locate({ setView: true, maxZoom: 16 })
-  }
+  const markerRef = useRef(null)
+  const circleRef = useRef(null)
 
   useEffect(() => {
     const locateControl = L.control({ position: 'topright' })
@@ -85,18 +83,35 @@ function LocationButton() {
       div.innerHTML = '<button title="Find my location" aria-label="Find my location">📍</button>'
       div.onclick = (e) => {
         e.stopPropagation()
-        handleLocate()
+        map.locate({ setView: true, maxZoom: 16 })
       }
       return div
     }
 
     locateControl.addTo(map)
 
+    // Reuse marker instead of creating new ones
     map.on('locationfound', (e) => {
-      L.marker(e.latlng)
-        .addTo(map)
-        .bindPopup('You are here')
-        .openPopup()
+      if (markerRef.current) {
+        markerRef.current.setLatLng(e.latlng)
+        circleRef.current.setLatLng(e.latlng).setRadius(e.accuracy)
+      } else {
+        circleRef.current = L.circle(e.latlng, {
+          radius: e.accuracy,
+          color: '#4285f4',
+          fillColor: '#4285f4',
+          fillOpacity: 0.15,
+          weight: 1
+        }).addTo(map)
+
+        const locIcon = L.divIcon({
+          className: 'user-location-marker',
+          html: '<div style="width:14px;height:14px;background:#4285f4;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.3)"></div>',
+          iconSize: [14, 14],
+          iconAnchor: [7, 7]
+        })
+        markerRef.current = L.marker(e.latlng, { icon: locIcon }).addTo(map)
+      }
     })
 
     map.on('locationerror', (e) => {
@@ -105,6 +120,8 @@ function LocationButton() {
 
     return () => {
       locateControl.remove()
+      if (markerRef.current) markerRef.current.remove()
+      if (circleRef.current) circleRef.current.remove()
     }
   }, [map])
 
