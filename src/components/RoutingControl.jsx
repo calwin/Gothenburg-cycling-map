@@ -4,7 +4,6 @@ import L from 'leaflet'
 import 'leaflet-routing-machine'
 import * as ors from '../services/openRouteService'
 import * as valhalla from '../services/valhallaService'
-import * as greenWaypoints from '../services/greenWaypointService'
 
 // OSRM profiles - fallback when ORS is not configured
 const OSRM_PROFILES = {
@@ -108,6 +107,7 @@ function RoutingControl({ start, end, mode, routeType, onRouteFound, onRouteErro
         onRouteFound({
           distance: result.distance,
           duration: result.duration,
+          mode,
           ascent: result.ascent,
           descent: result.descent,
           instructions: result.instructions,
@@ -154,7 +154,7 @@ function RoutingControl({ start, end, mode, routeType, onRouteFound, onRouteErro
 
     // Add markers for scenic waypoints (parks, rivers, viewpoints, etc.)
     if (waypoints && waypoints.length > 0) {
-      waypoints.forEach((wp, index) => {
+      waypoints.forEach((wp) => {
         const icon = wp.icon || '🌳'
         const waypointIcon = L.divIcon({
           className: 'waypoint-marker',
@@ -198,11 +198,13 @@ function RoutingControl({ start, end, mode, routeType, onRouteFound, onRouteErro
         onRouteFound({
           distance: result.distance,
           duration: result.duration,
+          mode,
           ascent: result.ascent,
           descent: result.descent,
           instructions: result.instructions,
           elevation: result.elevation,
-          geometry: result.geometry // Include for GPX export
+          geometry: result.geometry, // Include for GPX export
+          source: 'ors'
         })
       }
     } catch (error) {
@@ -257,22 +259,33 @@ function RoutingControl({ start, end, mode, routeType, onRouteFound, onRouteErro
       const routes = e.routes
       if (routes && routes.length > 0) {
         const route = routes[0]
+        const geometryCoordinates = route.coordinates?.map(coord => [coord.lng, coord.lat]) || []
 
         if (onRouteFound) {
           onRouteFound({
             distance: route.summary.totalDistance,
             duration: route.summary.totalTime,
+            mode,
             ascent: null,
             descent: null,
-            instructions: route.instructions?.map(instr => ({
-              text: instr.text,
-              distance: instr.distance,
-              duration: instr.time,
-              type: instr.type,
-              modifier: instr.modifier,
-              name: instr.road
-            })) || [],
-            elevation: null
+            instructions: route.instructions?.map((instr) => {
+              const coord = route.coordinates?.[instr.index]
+              return {
+                text: instr.text,
+                distance: instr.distance,
+                duration: instr.time,
+                type: instr.type,
+                modifier: instr.modifier,
+                name: instr.road,
+                location: coord ? [coord.lat, coord.lng] : null
+              }
+            }) || [],
+            elevation: null,
+            geometry: {
+              type: 'LineString',
+              coordinates: geometryCoordinates
+            },
+            source: 'osrm'
           })
         }
       }

@@ -6,6 +6,8 @@ function NavigationMode({
   onClose,
   onReroute
 }) {
+  const REROUTE_DISTANCE_METERS = 45
+  const REROUTE_DELAY_MS = 3000
   const [currentStep, setCurrentStep] = useState(0)
   const [distanceToNext, setDistanceToNext] = useState(null)
   const [eta, setEta] = useState(null)
@@ -28,9 +30,46 @@ function NavigationMode({
   }
 
   const getDistanceToRoute = (lat, lng) => {
+    if (!routeCoords || routeCoords.length === 0) return Infinity
+    if (routeCoords.length === 1) {
+      return getDistance(lat, lng, routeCoords[0][1], routeCoords[0][0])
+    }
+
+    const toMeters = (latDeg, lngDeg, referenceLat) => {
+      const metersPerDegLat = 111132
+      const metersPerDegLng = 111320 * Math.cos(referenceLat * Math.PI / 180)
+      return {
+        x: lngDeg * metersPerDegLng,
+        y: latDeg * metersPerDegLat
+      }
+    }
+
+    const getDistanceToSegment = (point, start, end) => {
+      const segX = end.x - start.x
+      const segY = end.y - start.y
+      const segLenSq = segX * segX + segY * segY
+      if (segLenSq === 0) {
+        return Math.sqrt((point.x - start.x) ** 2 + (point.y - start.y) ** 2)
+      }
+
+      const t = Math.max(0, Math.min(1, ((point.x - start.x) * segX + (point.y - start.y) * segY) / segLenSq))
+      const projX = start.x + t * segX
+      const projY = start.y + t * segY
+
+      return Math.sqrt((point.x - projX) ** 2 + (point.y - projY) ** 2)
+    }
+
     let minDist = Infinity
-    for (let i = 0; i < routeCoords.length; i++) {
-      const d = getDistance(lat, lng, routeCoords[i][1], routeCoords[i][0])
+    for (let i = 0; i < routeCoords.length - 1; i++) {
+      const start = routeCoords[i]
+      const end = routeCoords[i + 1]
+      const referenceLat = (lat + start[1] + end[1]) / 3
+
+      const pointMeters = toMeters(lat, lng, referenceLat)
+      const startMeters = toMeters(start[1], start[0], referenceLat)
+      const endMeters = toMeters(end[1], end[0], referenceLat)
+
+      const d = getDistanceToSegment(pointMeters, startMeters, endMeters)
       if (d < minDist) minDist = d
     }
     return minDist
@@ -38,44 +77,59 @@ function NavigationMode({
 
   useEffect(() => {
     setCurrentStep(0)
+    setDistanceToNext(null)
     setIsRerouting(false)
+    if (rerouteTimerRef.current) {
+      clearTimeout(rerouteTimerRef.current)
+      rerouteTimerRef.current = null
+    }
   }, [routeInfo])
 
   useEffect(() => {
-    if (!userLocation || !instructions[currentStep]?.location) return
+    if (!userLocation) return
 
-    const stepLoc = instructions[currentStep].location
+    const stepLoc = instructions[currentStep]?.location
+    if (!stepLoc) {
+      setDistanceToNext(null)
+      return
+    }
+
     const dist = getDistance(userLocation.lat, userLocation.lng, stepLoc[0], stepLoc[1])
     setDistanceToNext(dist)
 
     if (dist < 25 && currentStep < instructions.length - 1) {
       setCurrentStep(prev => prev + 1)
     }
+  }, [userLocation, currentStep, instructions])
 
-    if (onReroute && routeCoords.length > 0 && !isRerouting) {
-      const distToRoute = getDistanceToRoute(userLocation.lat, userLocation.lng)
-      if (distToRoute > 50) {
-        if (!rerouteTimerRef.current) {
-          rerouteTimerRef.current = setTimeout(() => {
-            setIsRerouting(true)
-            onReroute({ lat: userLocation.lat, lng: userLocation.lng })
-            rerouteTimerRef.current = null
-          }, 5000)
-        }
-      } else {
-        if (rerouteTimerRef.current) {
-          clearTimeout(rerouteTimerRef.current)
+  useEffect(() => {
+    if (!userLocation || !onReroute || routeCoords.length < 2 || isRerouting) return
+
+    const distToRoute = getDistanceToRoute(userLocation.lat, userLocation.lng)
+    if (distToRoute > REROUTE_DISTANCE_METERS) {
+      if (!rerouteTimerRef.current) {
+        rerouteTimerRef.current = setTimeout(() => {
           rerouteTimerRef.current = null
-        }
+          setIsRerouting(true)
+          onReroute({ lat: userLocation.lat, lng: userLocation.lng })
+        }, REROUTE_DELAY_MS)
       }
+      return
     }
 
+    if (rerouteTimerRef.current) {
+      clearTimeout(rerouteTimerRef.current)
+      rerouteTimerRef.current = null
+    }
+  }, [userLocation, onReroute, routeCoords, isRerouting])
+
+  useEffect(() => {
     const remainingDist = instructions
       .slice(currentStep)
       .reduce((sum, inst) => sum + (inst.distance || 0), 0)
     const avgSpeed = routeInfo?.mode === 'walking' ? 5 : 15
     setEta(Math.round((remainingDist / 1000) / avgSpeed * 60))
-  }, [userLocation, currentStep, instructions, routeInfo?.mode, routeCoords, onReroute, isRerouting])
+  }, [instructions, currentStep, routeInfo?.mode])
 
   useEffect(() => {
     return () => {
@@ -97,7 +151,7 @@ function NavigationMode({
   }
 
   const formatEta = (minutes) => {
-    if (!minutes) return '--'
+    if (minutes == null) return '--'
     if (minutes < 60) return `${minutes} min`
     return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
   }

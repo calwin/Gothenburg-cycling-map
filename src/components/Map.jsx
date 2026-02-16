@@ -139,6 +139,8 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint, endPoin
   const watchIdRef = useRef(null)
   const lastHeadingRef = useRef(0)
   const lastPositionRef = useRef(null)
+  const lastRawPositionRef = useRef(null)
+  const lastPanAtRef = useRef(0)
   const wakeLockRef = useRef(null)
 
   // Keep ref in sync with state
@@ -175,9 +177,14 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint, endPoin
       recenterControlRef.current = null
       wakeLockRef.current = null
       lastPositionRef.current = null
+      lastRawPositionRef.current = null
+      lastPanAtRef.current = 0
       lastHeadingRef.current = 0
+      setIsFollowing(true)
       return
     }
+
+    setIsFollowing(true)
 
     // Keep screen awake during navigation
     const requestWakeLock = async () => {
@@ -261,9 +268,25 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint, endPoin
       iconAnchor: [30, 30]
     })
 
-    // Smooth position using exponential moving average
-    const smoothPosition = (raw, prev, factor = 0.3) => {
+    const haversineMeters = (from, to) => {
+      const R = 6371000
+      const dLat = (to.lat - from.lat) * Math.PI / 180
+      const dLng = (to.lng - from.lng) * Math.PI / 180
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(from.lat * Math.PI / 180) * Math.cos(to.lat * Math.PI / 180) *
+        Math.sin(dLng / 2) * Math.sin(dLng / 2)
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    }
+
+    const smoothAngle = (prevDeg, nextDeg, factor = 0.25) => {
+      const delta = ((((nextDeg - prevDeg) % 360) + 540) % 360) - 180
+      return (prevDeg + delta * factor + 360) % 360
+    }
+
+    // Smooth position using exponential moving average with accuracy-dependent factor
+    const smoothPosition = (raw, prev, accuracy = 20) => {
       if (!prev) return raw
+      const factor = accuracy > 35 ? 0.12 : accuracy > 20 ? 0.18 : 0.28
       return {
         lat: prev.lat + factor * (raw.lat - prev.lat),
         lng: prev.lng + factor * (raw.lng - prev.lng)
@@ -272,33 +295,42 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint, endPoin
 
     const updateLocation = (position) => {
       const { latitude, longitude, accuracy, heading: deviceHeading } = position.coords
-      const rawPos = { lat: latitude, lng: longitude }
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return
 
-      // Smooth the position to reduce GPS jitter
-      const smoothed = smoothPosition(rawPos, lastPositionRef.current)
+      const accuracyMeters = Number.isFinite(accuracy) ? accuracy : 20
+      const rawPos = { lat: latitude, lng: longitude }
+      const prevSmoothed = lastPositionRef.current
+      const prevRaw = lastRawPositionRef.current
+
+      // Ignore very noisy fixes once we already have a lock.
+      if (accuracyMeters > 120 && prevSmoothed) {
+        return
+      }
+
+      const rawMoveMeters = prevSmoothed ? haversineMeters(prevSmoothed, rawPos) : Infinity
+      const jitterThreshold = Math.max(3, Math.min(accuracyMeters * 0.25, 10))
+      const suppressAsJitter = prevSmoothed && rawMoveMeters < jitterThreshold
+
+      // Smooth the position and suppress tiny jumps.
+      const smoothed = suppressAsJitter ? prevSmoothed : smoothPosition(rawPos, prevSmoothed, accuracyMeters)
       const latlng = [smoothed.lat, smoothed.lng]
 
       // Calculate heading - only update when moved enough
-      let heading = deviceHeading
-      if ((heading === null || isNaN(heading)) && lastPositionRef.current) {
-        const prev = lastPositionRef.current
-        const dist = Math.sqrt(
-          Math.pow(rawPos.lat - prev.lat, 2) +
-          Math.pow(rawPos.lng - prev.lng, 2)
-        )
-        if (dist > 0.00005) { // ~5 meters - larger threshold to avoid heading flicker
-          heading = calculateHeading(prev, rawPos)
-          lastHeadingRef.current = heading
-        } else {
-          heading = lastHeadingRef.current
+      let heading = Number.isFinite(deviceHeading) ? deviceHeading : null
+      if (heading == null && prevRaw) {
+        const movementForHeading = haversineMeters(prevRaw, rawPos)
+        if (movementForHeading > 4) {
+          heading = calculateHeading(prevRaw, rawPos)
         }
-      } else if (heading !== null && !isNaN(heading)) {
-        lastHeadingRef.current = heading
-      } else {
-        heading = lastHeadingRef.current
       }
 
+      if (heading != null) {
+        lastHeadingRef.current = smoothAngle(lastHeadingRef.current, heading)
+      }
+
+      heading = lastHeadingRef.current
       lastPositionRef.current = smoothed
+      lastRawPositionRef.current = rawPos
 
       // Update or create arrow marker
       const arrowIcon = createArrowIcon(heading)
@@ -313,7 +345,7 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint, endPoin
       }
 
       // Update accuracy circle
-      const cappedAccuracy = Math.min(accuracy, 80)
+      const cappedAccuracy = Math.min(accuracyMeters, 80)
       if (circleRef.current) {
         circleRef.current.setLatLng(latlng)
         circleRef.current.setRadius(cappedAccuracy)
@@ -330,12 +362,21 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint, endPoin
 
       // Follow user - smooth pan
       if (isFollowingRef.current) {
-        map.panTo(latlng, { animate: true, duration: 0.5, noMoveStart: true })
+        const now = Date.now()
+        const center = map.getCenter()
+        const distFromCenter = haversineMeters(
+          { lat: center.lat, lng: center.lng },
+          smoothed
+        )
+        if (distFromCenter > 10 && now - lastPanAtRef.current > 900) {
+          map.panTo(latlng, { animate: true, duration: 0.35, noMoveStart: true })
+          lastPanAtRef.current = now
+        }
       }
 
-      // Notify parent with raw position for accurate rerouting
+      // Notify parent with smoothed position to reduce reroute noise
       if (onLocationUpdate) {
-        onLocationUpdate({ lat: latitude, lng: longitude, heading, accuracy })
+        onLocationUpdate({ lat: smoothed.lat, lng: smoothed.lng, heading, accuracy: accuracyMeters })
       }
     }
 
@@ -346,7 +387,7 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint, endPoin
         (error) => console.error('GPS error:', error),
         {
           enableHighAccuracy: true,
-          maximumAge: 1000,
+          maximumAge: 1500,
           timeout: 10000
         }
       )
@@ -358,6 +399,8 @@ function NavigationTracker({ isNavigating, onLocationUpdate, startPoint, endPoin
       if (circleRef.current) { circleRef.current.remove(); circleRef.current = null }
       if (recenterControlRef.current) { recenterControlRef.current.remove(); recenterControlRef.current = null }
       if (wakeLockRef.current) { wakeLockRef.current.release(); wakeLockRef.current = null }
+      lastRawPositionRef.current = null
+      lastPanAtRef.current = 0
       map.off('dragstart', onDragStart)
 
       // Re-add zoom control

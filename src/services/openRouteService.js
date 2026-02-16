@@ -147,19 +147,25 @@ export async function getDirections(start, end, mode = 'cycling', options = {}) 
     const properties = feature.properties
     const summary = properties.summary
     const segments = properties.segments[0]
+    const geometryCoordinates = feature.geometry.coordinates || []
 
     return {
       distance: summary.distance,
       duration: summary.duration,
       ascent: properties.ascent || 0,
       descent: properties.descent || 0,
-      instructions: segments.steps.map(step => ({
-        text: step.instruction,
-        distance: step.distance,
-        duration: step.duration,
-        type: step.type,
-        name: step.name
-      })),
+      instructions: segments.steps.map(step => {
+        const firstWaypointIndex = Array.isArray(step.way_points) ? step.way_points[0] : null
+        const waypoint = firstWaypointIndex != null ? geometryCoordinates[firstWaypointIndex] : null
+        return {
+          text: step.instruction,
+          distance: step.distance,
+          duration: step.duration,
+          type: step.type,
+          name: step.name,
+          location: waypoint ? [waypoint[1], waypoint[0]] : null
+        }
+      }),
       geometry: feature.geometry,
       elevation: extractElevationProfile(feature.geometry.coordinates)
     }
